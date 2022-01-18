@@ -122,8 +122,6 @@ void CORE_BlockedMT()
 	blocked.numOfOps = 0;
 	blocked.numOfCycles = 0;
 	Instruction *inst = malloc(sizeof(Instruction));
-	
-
 	num_of_threads = SIM_GetThreadsNum();
 	switch_penalty = SIM_GetSwitchCycles();
 	blocked.RR = malloc(sizeof(thread *) * num_of_threads);
@@ -141,6 +139,7 @@ void CORE_BlockedMT()
 	}
 	// get next opcode from thread if isn't busy and hasn't finished
 	int current = 0;
+	int next = 0;
 	bool finished = false;
 	while (!finished)
 	{
@@ -158,31 +157,42 @@ void CORE_BlockedMT()
 		// if this thread is finished
 		if (blocked.RR[current]->finished)
 		{
+			//all finished
 			if (getNextUnfinishedThread(blocked.RR, current) == -1)
 			{
 				finished = true;
+				free(inst);
 				return;
 			}
 			else
 			{
 				//get next thread
-				current = getNextReadyThread(blocked.RR, current);
-				while (current == -1)
+				next = getNextReadyThread(blocked.RR, current);
+				while (next == -1)
 				{
 					//if next thread is busy, wait on current thread until available
 					blocked.numOfCycles += 1;
 					lowerBusyCycles(blocked.RR, 1);
-					current = getNextReadyThread(blocked.RR, current);
+					next = getNextReadyThread(blocked.RR, current);
+					/*all finished
+					if (getNextUnfinishedThread(blocked.RR, current) == -1)
+					{
+						finished = true;
+						free(inst);
+						return;
+					}*/
 				}
+				current = next;
 			}
 			// context switch
 			blocked.numOfCycles += switch_penalty;
 			lowerBusyCycles(blocked.RR, switch_penalty);
 		}
 
+		//current thread didnt finish but busy
 		while (blocked.RR[current]->busyCycles > 0 && !blocked.RR[current]->finished)
 		{
-			int next = getNextReadyThread(blocked.RR, current);
+			next = getNextReadyThread(blocked.RR, current);
 			// if there is another thread ready, switch
 			if (next != -1)
 			{
@@ -225,7 +235,6 @@ void CORE_FinegrainedMT()
 
 	int current = 0;
 	int next = 0;
-	bool finished = false;
 	while (!processFinished(finegrained.RR))
 	{
 		finegrained.numOfOps++;
@@ -234,31 +243,35 @@ void CORE_FinegrainedMT()
 		// get next opcode from thread
 		SIM_MemInstRead(finegrained.RR[current]->currLine, inst, current);
 		doOpcode(finegrained.RR[current], inst);
-
+		if (processFinished(finegrained.RR))
+		{
+			break;
+		}
 		// next line is 4 bytes after
 		finegrained.RR[current]->currLine += 1;
 		finegrained.RR[current]->currAdd += 4;
 
 		next = getNextReadyThread(finegrained.RR, current);
-
-		
-			// while no other thread is ready wait here
-			while (next == -1 && finegrained.RR[current]->busyCycles >0 )
+			// while no other thread is ready or im busy or im finished
+			while (next == -1)
 			{
-				
-				// if there is another thread ready, switch
-				if (next != -1)
+				if (processFinished(finegrained.RR))
 				{
-					current = next;
 					break;
 				}
-				// if there are no ready threads
+				//if i am not busy but didnt finish
+				if(finegrained.RR[current]->busyCycles == 0 && !finegrained.RR[current]->finished)
+				{
+					break;
+				}
+				// if there are no ready threads (including me)then wait
 				else
 				{
 					finegrained.numOfCycles++;
 					// lower busycycles for all threads
 					lowerBusyCycles(finegrained.RR, 1);
 				}
+				//first check if others are not busy
 				next = getNextReadyThread(finegrained.RR, current);
 			}
 			
@@ -268,16 +281,27 @@ void CORE_FinegrainedMT()
 		}
 		
 	}
+	free(inst);
 }
 double CORE_BlockedMT_CPI()
 {
-	// free?
+	// free
+	for (int i = 0; i < num_of_threads; i++)
+	{
+		free(blocked.RR[i]);
+	}
+	free(blocked.RR);
 	return (double)blocked.numOfCycles / (double)blocked.numOfOps;
 }
 
 double CORE_FinegrainedMT_CPI()
 {
-	// free?
+	//free
+	for (int i = 0; i < num_of_threads; i++)
+	{
+		free(finegrained.RR[i]);
+	}
+	free(finegrained.RR);
 	return (double)finegrained.numOfCycles / (double)finegrained.numOfOps;
 }
 
